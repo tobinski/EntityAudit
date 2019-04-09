@@ -23,12 +23,14 @@
 
 namespace SimpleThings\EntityAudit\EventListener;
 
+use Doctrine\Common\EventSubscriber;
+use Doctrine\DBAL\Schema\Column;
+use Doctrine\ORM\Mapping\ClassMetadata;
 use Doctrine\ORM\Mapping\ClassMetadataInfo;
+use Doctrine\ORM\Tools\Event\GenerateSchemaEventArgs;
+use Doctrine\ORM\Tools\Event\GenerateSchemaTableEventArgs;
 use Doctrine\ORM\Tools\ToolEvents;
 use SimpleThings\EntityAudit\AuditManager;
-use Doctrine\ORM\Tools\Event\GenerateSchemaTableEventArgs;
-use Doctrine\ORM\Tools\Event\GenerateSchemaEventArgs;
-use Doctrine\Common\EventSubscriber;
 
 class CreateSchemaListener implements EventSubscriber
 {
@@ -60,18 +62,8 @@ class CreateSchemaListener implements EventSubscriber
     {
         $cm = $eventArgs->getClassMetadata();
 
-        if (!$this->metadataFactory->isAudited($cm->name)) {
-            $audited = false;
-            if ($cm->isInheritanceTypeJoined() && $cm->isRootEntity()) {
-                foreach ($cm->subClasses as $subClass) {
-                    if ($this->metadataFactory->isAudited($subClass)) {
-                        $audited = true;
-                    }
-                }
-            }
-            if (!$audited) {
-                return;
-            }
+        if (! $this->isAudited($cm)) {
+            return;
         }
 
         $schema = $eventArgs->getSchema();
@@ -79,8 +71,9 @@ class CreateSchemaListener implements EventSubscriber
         $revisionTable = $schema->createTable(
             $this->config->getTablePrefix().$entityTable->getName().$this->config->getTableSuffix()
         );
-        foreach ($entityTable->getColumns() AS $column) {
-            /* @var $column Column */
+
+        foreach ($entityTable->getColumns() as $column) {
+            /* @var Column $column */
             $revisionTable->addColumn($column->getName(), $column->getType()->getName(), array_merge(
                 $column->toArray(),
                 array('notnull' => false, 'autoincrement' => false)
@@ -95,6 +88,7 @@ class CreateSchemaListener implements EventSubscriber
         $pkColumns = $entityTable->getPrimaryKey()->getColumns();
         $pkColumns[] = $this->config->getRevisionFieldName();
         $revisionTable->setPrimaryKey($pkColumns);
+        $revisionTable->addIndex(array($this->config->getRevisionFieldName()));
     }
 
     public function postGenerateSchema(GenerateSchemaEventArgs $eventArgs)
@@ -105,7 +99,29 @@ class CreateSchemaListener implements EventSubscriber
             'autoincrement' => true,
         ));
         $revisionsTable->addColumn('timestamp', 'datetime');
-        $revisionsTable->addColumn('username', 'string');
+        $revisionsTable->addColumn('username', 'string')->setNotnull(false);
         $revisionsTable->setPrimaryKey(array('id'));
+    }
+
+    /**
+     * @param ClassMetadata $cm
+     *
+     * @return bool
+     */
+    private function isAudited(ClassMetadata $cm)
+    {
+        if ($this->metadataFactory->isAudited($cm->name)) {
+            return true;
+        }
+
+        if ($cm->isInheritanceTypeJoined() && $cm->rootEntityName == $cm->name) {
+            foreach ($cm->subClasses as $subClass) {
+                if ($this->metadataFactory->isAudited($subClass)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 }

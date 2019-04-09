@@ -24,25 +24,76 @@
 
 namespace SimpleThings\EntityAudit\Tests;
 
-use Doctrine\ORM\Mapping as ORM;
+use SimpleThings\EntityAudit\AuditReader;
+use SimpleThings\EntityAudit\Tests\Fixtures\Issue\DuplicateRevisionFailureTestOwnedElement;
+use SimpleThings\EntityAudit\Tests\Fixtures\Issue\DuplicateRevisionFailureTestPrimaryOwner;
+use SimpleThings\EntityAudit\Tests\Fixtures\Issue\DuplicateRevisionFailureTestSecondaryOwner;
+use SimpleThings\EntityAudit\Tests\Fixtures\Issue\EscapedColumnsEntity;
+use SimpleThings\EntityAudit\Tests\Fixtures\Issue\ConvertToPHPEntity;
+use SimpleThings\EntityAudit\Tests\Fixtures\Issue\Issue111Entity;
+use SimpleThings\EntityAudit\Tests\Fixtures\Issue\Issue156Contact;
+use SimpleThings\EntityAudit\Tests\Fixtures\Issue\Issue156ContactTelephoneNumber;
+use SimpleThings\EntityAudit\Tests\Fixtures\Issue\Issue156Client;
+use SimpleThings\EntityAudit\Tests\Fixtures\Issue\Issue194User;
+use SimpleThings\EntityAudit\Tests\Fixtures\Issue\Issue194Address;
+use SimpleThings\EntityAudit\Tests\Fixtures\Issue\Issue196Entity;
+use SimpleThings\EntityAudit\Tests\Fixtures\Issue\Issue31Reve;
+use SimpleThings\EntityAudit\Tests\Fixtures\Issue\Issue31User;
+use SimpleThings\EntityAudit\Tests\Fixtures\Issue\Issue87Organization;
+use SimpleThings\EntityAudit\Tests\Fixtures\Issue\Issue87Project;
+use SimpleThings\EntityAudit\Tests\Fixtures\Issue\Issue87ProjectComment;
+use SimpleThings\EntityAudit\Tests\Fixtures\Issue\Issue9Address;
+use SimpleThings\EntityAudit\Tests\Fixtures\Issue\Issue9Customer;
+use SimpleThings\EntityAudit\Tests\Fixtures\Issue\Issue198Owner;
+use SimpleThings\EntityAudit\Tests\Fixtures\Issue\Issue198Car;
 
 class IssueTest extends BaseTest
 {
-    protected $schemaEntities = array(
-        'SimpleThings\EntityAudit\Tests\EscapedColumnsEntity',
-        'SimpleThings\EntityAudit\Tests\Issue87Project',
-        'SimpleThings\EntityAudit\Tests\Issue87ProjectComment',
-        'SimpleThings\EntityAudit\Tests\Issue87AbstractProject',
-        'SimpleThings\EntityAudit\Tests\Issue87Organization'
+    protected $fixturesPath = __DIR__ . '/Fixtures/Issue';
+
+    protected $customTypes = array(
+        'issue196type' => 'SimpleThings\EntityAudit\Tests\Types\Issue196Type',
+        'upper' => 'SimpleThings\EntityAudit\Tests\Types\ConvertToPHPType',
     );
 
-    protected $auditedEntities = array(
-        'SimpleThings\EntityAudit\Tests\EscapedColumnsEntity',
-        'SimpleThings\EntityAudit\Tests\Issue87Project',
-        'SimpleThings\EntityAudit\Tests\Issue87ProjectComment',
-        'SimpleThings\EntityAudit\Tests\Issue87AbstractProject',
-        'SimpleThings\EntityAudit\Tests\Issue87Organization'
-    );
+    public function testIssue31()
+    {
+        $reve = new Issue31Reve();
+        $reve->setTitre('reve');
+
+        $this->em->persist($reve);
+        $this->em->flush();
+
+        $user = new Issue31User();
+        $user->setTitre('user');
+        $user->setReve($reve);
+
+        $this->em->persist($user);
+        $this->em->flush();
+
+        $this->em->remove($user);
+        $this->em->flush();
+    }
+
+    public function testIssue111()
+    {
+        $this->em->getEventManager()->addEventSubscriber(new \Gedmo\SoftDeleteable\SoftDeleteableListener());
+
+        $e = new Issue111Entity();
+        $e->setStatus('test status');
+
+        $this->em->persist($e);
+        $this->em->flush($e); //#1
+
+        $this->em->remove($e);
+        $this->em->flush(); //#2
+
+        $reader = $this->auditManager->createAuditReader($this->em);
+
+        $ae = $reader->find('SimpleThings\EntityAudit\Tests\Fixtures\Issue\Issue111Entity', 1, 2);
+
+        $this->assertInstanceOf('DateTime', $ae->getDeletedAt());
+    }
 
     public function testEscapedColumns()
     {
@@ -91,173 +142,158 @@ class IssueTest extends BaseTest
         $this->assertEquals('changed project title', $auditedComment->getProject()->getTitle());
 
     }
-}
 
-/**
- * @ORM\Entity
- */
-class Issue87ProjectComment
-{
-    /** @ORM\Id @ORM\Column(type="integer") @ORM\GeneratedValue(strategy="AUTO") */
-    protected $id;
-
-    /** @ORM\ManytoOne(targetEntity="Issue87AbstractProject") @ORM\JoinColumn(name="a_join_column") */
-    protected $project;
-
-    /** @ORM\Column(type="text") */
-    protected $text;
-
-    public function getId()
+    public function testIssue9()
     {
-        return $this->id;
+        $address = new Issue9Address();
+        $address->setAddressText('NY, Red Street 6');
+
+        $customer = new Issue9Customer();
+        $customer->setAddresses(array($address));
+        $customer->setPrimaryAddress($address);
+
+        $address->setCustomer($customer);
+
+        $this->em->persist($customer);
+        $this->em->persist($address);
+
+        $this->em->flush(); //#1
+
+        $reader = $this->auditManager->createAuditReader($this->em);
+
+        $aAddress = $reader->find(get_class($address), $address->getId(), 1);
+        $this->assertEquals($customer->getId(), $aAddress->getCustomer()->getId());
+
+        /** @var Issue9Customer $aCustomer */
+        $aCustomer = $reader->find(get_class($customer), $customer->getId(), 1);
+
+        $this->assertNotNull($aCustomer->getPrimaryAddress());
+        $this->assertEquals('NY, Red Street 6', $aCustomer->getPrimaryAddress()->getAddressText());
     }
 
-    public function getProject()
+    public function testDuplicateRevisionKeyConstraintFailure()
     {
-        return $this->project;
+        $primaryOwner = new DuplicateRevisionFailureTestPrimaryOwner();
+        $this->em->persist($primaryOwner);
+
+        $secondaryOwner = new DuplicateRevisionFailureTestSecondaryOwner();
+        $this->em->persist($secondaryOwner);
+
+        $primaryOwner->addSecondaryOwner($secondaryOwner);
+
+        $element = new DuplicateRevisionFailureTestOwnedElement();
+        $this->em->persist($element);
+
+        $primaryOwner->addElement($element);
+        $secondaryOwner->addElement($element);
+
+        $this->em->flush();
+
+        $this->em->getUnitOfWork()->clear();
+
+        $primaryOwner = $this->em->find('SimpleThings\EntityAudit\Tests\Fixtures\Issue\DuplicateRevisionFailureTestPrimaryOwner', 1);
+
+        $this->em->remove($primaryOwner);
+        $this->em->flush();
     }
 
-    public function setProject($project)
+    public function testIssue156()
     {
-        $this->project = $project;
+        $client = new Issue156Client();
+
+        $number = new Issue156ContactTelephoneNumber();
+        $number->setNumber('0123567890');
+        $client->addTelephoneNumber($number);
+
+        $this->em->persist($client);
+        $this->em->persist($number);
+        $this->em->flush();
+
+        $auditReader = $this->auditManager->createAuditReader($this->em);
+        $object = $auditReader->find(get_class($number), $number->getId(), 1);
     }
 
-    public function getText()
+    public function testIssue194()
     {
-        return $this->text;
+        $user = new Issue194User();
+        $address = new Issue194Address($user);
+
+        $this->em->persist($user);
+        $this->em->flush();
+        $this->em->persist($address);
+        $this->em->flush();
+
+        $auditReader = $this->auditManager->createAuditReader($this->em);
+        $auditUser = $auditReader->find(get_class($user), $user->getId(), 1);
+        $auditAddress = $auditReader->find(get_class($address), $address->getUser()->getId(), 2);
+        $this->assertEquals($auditAddress->getUser(), $auditUser);
+        $this->assertEquals($address->getUser(), $auditUser);
+        $this->assertEquals($auditAddress->getUser(), $user);
+    }
+    
+    public function testIssue196()
+    {
+        $entity = new Issue196Entity();
+        $entity->setSqlConversionField('THIS SHOULD BE LOWER CASE');
+        $this->em->persist($entity);
+        $this->em->flush();
+        $this->em->clear();
+
+        $persistedEntity = $this->em->find(get_class($entity), $entity->getId());
+
+        $auditReader = $this->auditManager->createAuditReader($this->em);
+        $currentRevision = $auditReader->getCurrentRevision(get_class($entity), $entity->getId());
+        $currentRevisionEntity = $auditReader->find(get_class($entity), $entity->getId(), $currentRevision);
+
+        $this->assertEquals(
+            $persistedEntity,
+            $currentRevisionEntity,
+            'Current revision of audited entity is not equivalent to persisted entity:'
+        );
     }
 
-    public function setText($text)
+    public function testIssue198()
     {
-        $this->text = $text;
-    }
-}
+        $owner = new Issue198Owner();
+        $car = new Issue198Car();
+        
+        $this->em->persist($owner);
+        $this->em->persist($car);
+        $this->em->flush();
+        
+        $owner->addCar($car);
 
-/**
- * @ORM\Table(name="project_project_abstract")
- * @ORM\Entity(repositoryClass="Umm\ProjectBundle\Repository\AbstractProjectRepository")
- * @ORM\InheritanceType("JOINED")
- * @ORM\DiscriminatorColumn(name="discr", type="string")
- * @ORM\DiscriminatorMap({"project" = "Issue87Project"})
- */
-abstract class Issue87AbstractProject
-{
-    /** @ORM\Id @ORM\Column(type="integer") @ORM\GeneratedValue(strategy="AUTO") */
-    protected $id;
+        $this->em->persist($owner);
+        $this->em->persist($car);
+        $this->em->flush();
 
-    /** @ORM\Column(name="title", type="string", length=50) */
-    protected $title; //This property is in the _audit table for each subclass
-
-    /** @ORM\Column(name="description", type="string", length=1000, nullable=true) */
-    protected $description; //This property is in the _audit table for each subclass
-
-    /**
-     * @ORM\ManyToOne(targetEntity="Issue87Organization")
-     * @ORM\JoinColumn(nullable=true)
-     */
-    protected $organisation; //This association is NOT in the _audit table for the subclasses
-
-    public function getId()
-    {
-        return $this->id;
+        $auditReader = $this->auditManager->createAuditReader($this->em);
+        
+        $car1 = $auditReader->find(get_class($car), $car->getId(), 1);
+        $this->assertNull($car1->getOwner());
+        
+        $car2 = $auditReader->find(get_class($car), $car->getId(), 2);
+        $this->assertEquals($car2->getOwner()->getId(), $owner->getId());
     }
 
-    public function getDescription()
+    public function testConvertToPHP()
     {
-        return $this->description;
-    }
+        $entity = new ConvertToPHPEntity();
+        $entity->setSqlConversionField('TEST CONVERT TO PHP');
+        $this->em->persist($entity);
+        $this->em->flush();
+        $this->em->clear();
 
-    public function setDescription($description)
-    {
-        $this->description = $description;
-    }
+        $persistedEntity = $this->em->find(get_class($entity), $entity->getId());
 
-    public function getOrganisation()
-    {
-        return $this->organisation;
-    }
+        $auditReader = $this->auditManager->createAuditReader($this->em);
+        $currentRevision = $auditReader->getCurrentRevision(get_class($entity), $entity->getId());
+        $currentRevisionEntity = $auditReader->find(get_class($entity), $entity->getId(), $currentRevision);
 
-    public function setOrganisation($organisation)
-    {
-        $this->organisation = $organisation;
-    }
-
-    public function getTitle()
-    {
-        return $this->title;
-    }
-
-    public function setTitle($title)
-    {
-        $this->title = $title;
-    }
-}
-
-/** @ORM\Entity @ORM\Table(name="project_project") */
-class Issue87Project extends Issue87AbstractProject
-{
-    /**
-     * @ORM\Column(type="string")
-     */
-    protected $someProperty;
-
-    public function getSomeProperty()
-    {
-        return $this->someProperty;
-    }
-
-    public function setSomeProperty($someProperty)
-    {
-        $this->someProperty = $someProperty;
-    }
-}
-
-/** @ORM\Entity */
-class Issue87Organization
-{
-    /** @ORM\Id @ORM\Column(type="integer") @ORM\GeneratedValue(strategy="AUTO") */
-    protected $id;
-
-    public function getId()
-    {
-        return $this->id;
-    }
-}
-
-/** @ORM\Entity */
-class EscapedColumnsEntity
-{
-    /** @ORM\Id @ORM\GeneratedValue() @ORM\Column(type="integer") */
-    protected $id;
-
-    /** @ORM\Column(type="integer", name="lft") */
-    protected $left;
-
-    /** @ORM\Column(type="integer", name="`left`") */
-    protected $lft;
-
-    public function getId()
-    {
-        return $this->id;
-    }
-
-    public function getLeft()
-    {
-        return $this->left;
-    }
-
-    public function setLeft($left)
-    {
-        $this->left = $left;
-    }
-
-    public function getLft()
-    {
-        return $this->lft;
-    }
-
-    public function setLft($lft)
-    {
-        $this->lft = $lft;
+        $this->assertEquals(
+            $persistedEntity,
+            $currentRevisionEntity,
+            'Current revision of audited entity is not equivalent to persisted entity:'
+        );
     }
 }

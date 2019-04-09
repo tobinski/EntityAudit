@@ -1,9 +1,18 @@
 # EntityAudit Extension for Doctrine2
 
-[![Build Status](https://travis-ci.org/simplethings/EntityAudit.svg?branch=master)](https://travis-ci.org/simplethings/EntityAudit)
+| Master | 1.0 Branch |
+|:----------------:|:----------:|
+| [![Build Status](https://travis-ci.org/simplethings/EntityAuditBundle.svg?branch=master)](https://travis-ci.org/simplethings/EntityAuditBundle) | [![Build Status](https://travis-ci.org/simplethings/EntityAuditBundle.svg?branch=1.0)](https://travis-ci.org/simplethings/EntityAuditBundle) |
+|[documentation](https://github.com/simplethings/EntityAuditBundle/blob/master/README.md)|[documentation](https://github.com/simplethings/EntityAudit/blob/1.0/README.md)
+
+**WARNING: Master isn't stable yet and it might not be working! Please use version `^1.0` and this documentation: https://github.com/simplethings/EntityAudit/blob/1.0/README.md**
 
 This extension for Doctrine 2 is inspired by [Hibernate Envers](http://www.jboss.org/envers) and
 allows full versioning of entities and their associations.
+
+## Is this library still maintained?
+
+[Maybe?](https://github.com/simplethings/EntityAudit/issues/203) - please discuss and support us in the linked issue
 
 ## How does it work?
 
@@ -22,19 +31,35 @@ points in time.
 This extension hooks into the SchemaTool generation process so that it will automatically
 create the necessary DDL statements for your audited entities.
 
-## Installation (In Symfony2 Application)
+## Installation (Standalone)
 
-###Installing the bundle
+### Installing the lib/bundle
 
 Simply run assuming you have installed composer.phar or composer binary:
 
 ``` bash
-$ php composer.phar require simplethings/entity-audit-bundle
+$ composer require simplethings/entity-audit-bundle
 ```
 
-###Enable the bundle
+For standalone usage you have to pass the EntityManager.
 
-Finally, enable the bundle in the kernel:
+```php
+use Doctrine\ORM\EntityManager;
+use SimpleThings\EntityAudit\AuditManager;
+
+$config = new \Doctrine\ORM\Configuration();
+// $config ...
+$conn = array();
+$em = EntityManager::create($conn, $config, $evm);
+
+$auditManager = AuditManager::create($em);
+```
+
+## Installation (In Symfony2 Application)
+
+### Enable the bundle
+
+Enable the bundle in the kernel:
 
 ``` php
 // app/AppKernel.php
@@ -50,28 +75,23 @@ public function registerBundles()
 }
 ```
 
-###Configuration
+### Configuration
 
-Load extension "simple_things_entity_audit" and specify the audited entities (yes, that ugly for now!)
+You can configure the audited tables. 
 
-#####app/config/config.yml
+##### app/config/config.yml
 ```yml
-    simple_things_entity_audit:
-        audited_entities:
-            - MyBundle\Entity\MyEntity
-            - MyBundle\Entity\MyEntity2
-```
-If you need to exclude some entity properties from triggering a revision use:
-
-#####app/config/config.yml
-```yml
-    simple_things_entity_audit:
-        global_ignore_columns:
-            - created_at
-            - updated_at
+simple_things_entity_audit:
+    entity_manager: default
+    table_prefix: ''
+    table_suffix: _audit
+    revision_field_name: rev
+    revision_type_field_name: revtype
+    revision_table_name: revisions
+    revision_id_field_type: integer
 ```
 
-###Creating new tables
+### Creating new tables
 
 Call the command below to see the new tables in the update schema queue.
 
@@ -79,44 +99,48 @@ Call the command below to see the new tables in the update schema queue.
 ./app/console doctrine:schema:update --dump-sql 
 ```
 
-**Notice**: EntityAudit currently **only** works with a DBAL Connection and EntityManager named **"default"**.
-
-
-## Installation (Standalone)
-
-For standalone usage you have to pass the entity class names to be audited to the MetadataFactory
-instance and configure the two event listeners.
-
-```php
-use Doctrine\ORM\EntityManager;
-use Doctrine\Common\EventManager;
-use SimpleThings\EntityAudit\AuditConfiguration;
-use SimpleThings\EntityAudit\AuditManager;
-
-$auditconfig = new AuditConfiguration();
-$auditconfig->setAuditedEntityClasses(array(
-    'SimpleThings\EntityAudit\Tests\ArticleAudit',
-    'SimpleThings\EntityAudit\Tests\UserAudit'
-));
-
-$auditconfig->setGlobalIgnoreColumns(array(
-    'created_at',
-    'updated_at'
-));
-
-$evm = new EventManager();
-$auditManager = new AuditManager($auditconfig);
-$auditManager->registerEvents($evm);
-
-$config = new \Doctrine\ORM\Configuration();
-// $config ...
-$conn = array();
-$em = EntityManager::create($conn, $config, $evm);
-```
-
 ## Usage
 
+### Define auditable entities
+ 
+You need add `Auditable` annotation for the entities which you want to auditable.
+  
+```php
+use Doctrine\ORM\Mapping as ORM;
+use SimpleThings\EntityAudit\Mapping\Annotation as Audit;
+
+/**
+ * @ORM\Entity()
+ * @Audit\Auditable()
+ */
+class Page {
+ //...
+}
+```
+
+You can also ignore fields in an specific entity.
+ 
+```php
+class Page {
+
+    /**
+     * @ORM\Column(type="string")
+     * @Audit\Ignore()
+     */
+    private $ignoreMe;
+
+}
+``` 
+
+### Use AuditReader
+
 Querying the auditing information is done using a `SimpleThings\EntityAudit\AuditReader` instance.
+
+In a standalone application you can create the audit reader from the audit manager:
+
+```php
+$auditReader = $auditManager->createAuditReader();
+```
 
 In Symfony2 the AuditReader is registered as the service "simplethings_entityaudit.reader":
 
@@ -125,15 +149,9 @@ class DefaultController extends Controller
 {
     public function indexAction()
     {
-        $auditReader = $this->container->get("simplethings_entityaudit.reader");
+        $auditReader = $this->container->get('simplethings_entityaudit.manager')->createAuditReader();
     }
 }
-```
-
-In a standalone application you can create the audit reader from the audit manager:
-
-```php
-    $auditReader = $auditManager->createAuditReader($entityManager);
 ```
 
 ### Find entity state at a particular revision
@@ -142,11 +160,11 @@ This command also returns the state of the entity at the given revision, even if
 to that entity was made in a revision before the given one:
 
 ```php
-    $articleAudit = $auditReader->find(
-        'SimpleThings\EntityAudit\Tests\ArticleAudit',
-        $id = 1,
-        $rev = 10
-    );
+$articleAudit = $auditReader->find(
+    'SimpleThings\EntityAudit\Tests\ArticleAudit',
+    $id = 1,
+    $rev = 10
+);
 ```
 
 Instances created through `AuditReader#find()` are *NOT* injected into the EntityManagers UnitOfWork,
@@ -156,10 +174,10 @@ in that old version.
 ### Find Revision History of an audited entity
 
 ```php
-    $revisions = $auditReader->findRevisions(
-        'SimpleThings\EntityAudit\Tests\ArticleAudit',
-        $id = 1
-    );
+$revisions = $auditReader->findRevisions(
+    'SimpleThings\EntityAudit\Tests\ArticleAudit',
+    $id = 1
+);
 ```
 
 A revision has the following API:
@@ -176,7 +194,7 @@ class Revision
 ### Find Changed Entities at a specific revision
 
 ```php
-    $changedEntities = $auditReader->findEntitiesChangedAtRevision( 10 );
+$changedEntities = $auditReader->findEntitiesChangedAtRevision(10);
 ```
 
 A changed entity has the API:
@@ -194,36 +212,45 @@ class ChangedEntity
 ### Find Current Revision of an audited Entity
 
 ```php
-    $revision = $auditReader->getCurrentRevision(
-        'SimpleThings\EntityAudit\Tests\ArticleAudit',
-        $id = 3
-    );
+$revision = $auditReader->getCurrentRevision(
+    'SimpleThings\EntityAudit\Tests\ArticleAudit',
+    $id = 3
+);
 ```
 
 ## Setting the Current Username
 
-Each revision automatically saves the username that changes it. For this to work you have to set the username.
-In the Symfony2 web context the username is automatically set to the one in the current security token.
+Each revision automatically saves the username that changes it. For this to work, the username must be resolved.
 
-In a standalone app or Symfony command you have to set the username to a specific value using the `AuditConfiguration`:
+In the Symfony2 web context the username is resolved from the one in the current security context token.
+
+You can override this with your own behaviour by configuring the `username_callable` service in the bundle configuration. Your custom service must be a `callable` and should return a `string` or `null`.
+
+##### app/config/config.yml
+```yml
+simple_things_entity_audit:
+    service:
+        username_callable: acme.username_callable
+```
+
+In a standalone app or Symfony command you can username callable to a specific value using the `AuditConfiguration`.
 
 ```php
-    // Symfony2 Context
-    $container->get('simplethings_entityaudit.config')->setCurrentUsername( "beberlei" );
-
-    // Standalone App
-    $auditConfig = new \SimpleThings\EntityAudit\AuditConfiguration();
-    $auditConfig->setCurrentUsername( "beberlei" );
+$auditConfig = new \SimpleThings\EntityAudit\AuditConfiguration();
+$auditConfig->setUsernameCallable(function () {
+	$username = //your customer logic
+    return username;
+});
 ```
 
 ## Viewing auditing
 
 A default Symfony2 controller is provided that gives basic viewing capabilities of audited data.
 
-To use the controller, import the routing **(dont forget to secure the prefix you set so that
+To use the controller, import the routing **(don't forget to secure the prefix you set so that
 only appropriate users can get access)**
 
-#####app/config/routing.yml
+##### app/config/routing.yml
 ```yml
 simple_things_entity_audit:
     resource: "@SimpleThingsEntityAuditBundle/Resources/config/routing.yml"
@@ -232,15 +259,26 @@ simple_things_entity_audit:
 
 This provides you with a few different routes:
 
- * simple_things_entity_audit_home -- Displays a paginated list of revisions, their timestamps and the user who performed the revision
- * simple_things_entity_audit_viewrevision -- Displays the classes that were modified in a specific revision
- * simple_things_entity_audit_viewentity -- Displays the revisions where the specified entity was modified
- * simple_things_entity_audit_viewentity_detail -- Displays the data for the specified entity at the specified revision
- * simple_things_entity_audit_compare -- Allows you to compare the changes of an entity between 2 revisions
+ * ```simple_things_entity_audit_home``` - Displays a paginated list of revisions, their timestamps and the user who performed the revision
+ * ```simple_things_entity_audit_viewrevision``` - Displays the classes that were modified in a specific revision
+ * ```simple_things_entity_audit_viewentity``` - Displays the revisions where the specified entity was modified
+ * ```simple_things_entity_audit_viewentity_detail``` - Displays the data for the specified entity at the specified revision
+ * ```simple_things_entity_audit_compare``` - Allows you to compare the changes of an entity between 2 revisions
 
 ## TODOS
 
 * Currently only works with auto-increment databases
-* Proper metadata mapping is necessary, allow to disable versioning for fields and associations.
-* It does NOT work with Joined-Table-Inheritance (Single Table Inheritance should work, but not tested)
-* Many-To-Many assocations are NOT versioned
+
+## Supported DB
+
+* MySQL / MariaDB
+* PostgesSQL
+* SQLite
+
+*We can only really support the databases if we can test them via Travis.*
+
+## Contributing
+
+Please before commiting, run this command `./vendor/bin/php-cs-fixer fix --verbose` to normalize the coding style.
+
+If you already have the fixer locally you can run `php-cs-fixer fix .`.

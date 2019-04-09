@@ -23,105 +23,208 @@
 
 namespace SimpleThings\EntityAudit;
 
+use Doctrine\ORM\Mapping\ClassMetadataInfo;
+use SimpleThings\EntityAudit\Metadata\Driver\AnnotationDriver;
+use SimpleThings\EntityAudit\Metadata\Driver\DriverInterface;
+
 class AuditConfiguration
 {
-    private $prefix = '';
-    private $suffix = '_audit';
-    private $revisionFieldName = 'rev';
-    private $revisionTypeFieldName = 'revtype';
+    /**
+     * @var DriverInterface
+     */
+    private $metadataDriver;
+
+    /**
+     * @var string
+     */
+    private $tablePrefix = '';
+
+    /**
+     * @var string
+     */
+    private $tableSuffix = '_audit';
+
+    /**
+     * @var string
+     */
     private $revisionTableName = 'revisions';
-    private $auditedEntityClasses = array();
-    private $globalIgnoreColumns = array();
-    private $currentUsername = '';
+
+    /**
+     * @var string
+     */
+    private $revisionFieldName = 'rev';
+
+    /**
+     * @var string
+     */
+    private $revisionTypeFieldName = 'revtype';
+
+    /**
+     * @var string
+     */
     private $revisionIdFieldType = 'integer';
 
+    /**
+     * @var callable
+     */
+    private $usernameCallable;
+
+    /**
+     * @param DriverInterface $driver
+     */
+    public function setMetadataDriver(DriverInterface $driver)
+    {
+        $this->metadataDriver = $driver;
+    }
+
+    /**
+     * @return DriverInterface
+     */
+    public function getMetadataDriver()
+    {
+        return $this->metadataDriver;
+    }
+
+    /**
+     * @param ClassMetadataInfo $metadata
+     *
+     * @return string
+     */
+    public function getTableName(ClassMetadataInfo $metadata)
+    {
+        $tableName = $this->getTablePrefix() . $metadata->getTableName() . $this->getTableSuffix();
+
+        if (!$metadata->getSchemaName()) {
+            return $tableName;
+        }
+
+        return $metadata->getSchemaName() . '.' . $tableName;
+    }
+
+    /**
+     * @return string
+     */
     public function getTablePrefix()
     {
-        return $this->prefix;
+        return $this->tablePrefix;
     }
 
+    /**
+     * @param string $prefix
+     */
     public function setTablePrefix($prefix)
     {
-        $this->prefix = $prefix;
+        $this->tablePrefix = $prefix;
     }
 
+    /**
+     * @return string
+     */
     public function getTableSuffix()
     {
-        return $this->suffix;
+        return $this->tableSuffix;
     }
 
+    /**
+     * @param string $suffix
+     */
     public function setTableSuffix($suffix)
     {
-        $this->suffix = $suffix;
+        $this->tableSuffix = $suffix;
     }
 
+    /**
+     * @return string
+     */
     public function getRevisionFieldName()
     {
         return $this->revisionFieldName;
     }
 
+    /**
+     * @param string $revisionFieldName
+     */
     public function setRevisionFieldName($revisionFieldName)
     {
         $this->revisionFieldName = $revisionFieldName;
     }
 
+    /**
+     * @return string
+     */
     public function getRevisionTypeFieldName()
     {
         return $this->revisionTypeFieldName;
     }
 
+    /**
+     * @param string $revisionTypeFieldName
+     */
     public function setRevisionTypeFieldName($revisionTypeFieldName)
     {
         $this->revisionTypeFieldName = $revisionTypeFieldName;
     }
 
+    /**
+     * @return string
+     */
     public function getRevisionTableName()
     {
         return $this->revisionTableName;
     }
 
+    /**
+     * @param string $revisionTableName
+     */
     public function setRevisionTableName($revisionTableName)
     {
         $this->revisionTableName = $revisionTableName;
     }
 
-    public function setAuditedEntityClasses(array $classes)
-    {
-        $this->auditedEntityClasses = $classes;
-    }
-
-    public function getGlobalIgnoreColumns()
-    {
-        return $this->globalIgnoreColumns;
-    }
-
-    public function setGlobalIgnoreColumns(array $columns)
-    {
-        $this->globalIgnoreColumns = $columns;
-    }
-
-    public function createMetadataFactory()
-    {
-        return new Metadata\MetadataFactory($this->auditedEntityClasses);
-    }
-
-    public function setCurrentUsername($username)
-    {
-        $this->currentUsername = $username;
-    }
-
+    /**
+     * @return string|null
+     */
     public function getCurrentUsername()
     {
-        return $this->currentUsername;
+        $callable = $this->usernameCallable;
+
+        return $callable ? $callable() : null;
     }
 
+    public function setUsernameCallable(callable $usernameCallable = null)
+    {
+        $this->usernameCallable = $usernameCallable;
+    }
+
+    /**
+     * @return callable|null
+     */
+    public function getUsernameCallable()
+    {
+        return $this->usernameCallable;
+    }
+
+    /**
+     * @param string $revisionIdFieldType
+     */
     public function setRevisionIdFieldType($revisionIdFieldType)
     {
         $this->revisionIdFieldType = $revisionIdFieldType;
     }
 
+    /**
+     * @return string
+     */
     public function getRevisionIdFieldType()
     {
         return $this->revisionIdFieldType;
+    }
+
+    /**
+     * @return AuditConfiguration
+     */
+    public static function createWithAnnotationDriver()
+    {
+        return new self(AnnotationDriver::create());
     }
 }

@@ -23,13 +23,10 @@
 
 namespace SimpleThings\EntityAudit\DependencyInjection;
 
-use Symfony\Component\DependencyInjection\Alias;
-use Symfony\Component\DependencyInjection\Loader\XmlFileLoader;
-use Symfony\Component\DependencyInjection\ContainerBuilder;
-use Symfony\Component\DependencyInjection\Definition;
-use Symfony\Component\DependencyInjection\Reference;
-use Symfony\Component\HttpKernel\DependencyInjection\Extension;
 use Symfony\Component\Config\FileLocator;
+use Symfony\Component\DependencyInjection\ContainerBuilder;
+use Symfony\Component\DependencyInjection\Loader\XmlFileLoader;
+use Symfony\Component\HttpKernel\DependencyInjection\Extension;
 
 class SimpleThingsEntityAuditExtension extends Extension
 {
@@ -41,22 +38,23 @@ class SimpleThingsEntityAuditExtension extends Extension
         $loader->load('auditable.xml');
 
         $configurables = array(
-            'audited_entities',
+            'entity_manager',
             'table_prefix',
             'table_suffix',
             'revision_field_name',
             'revision_type_field_name',
             'revision_table_name',
             'revision_id_field_type',
-            'global_ignore_columns'
         );
 
         foreach ($configurables as $key) {
-            $container->setParameter("simplethings.entityaudit." . $key, $config[$key]);
+            $container->setParameter('simplethings.entityaudit.' . $key, $config[$key]);
         }
 
-        if (true === $config['listener']['current_username']) {
-            $loader->load('current_username.xml');
+        foreach ($config['service'] as $key => $service) {
+            if (null !== $service) {
+                $container->setAlias('simplethings_entityaudit.'.$key, $service);
+            }
         }
     }
 }

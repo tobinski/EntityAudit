@@ -25,6 +25,7 @@ namespace SimpleThings\EntityAudit\Controller;
 
 use Symfony\Bundle\FrameworkBundle\Controller\Controller;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Response;
 
 /**
  * Controller for listing auditing information
@@ -38,7 +39,7 @@ class AuditController extends Controller
      */
     protected function getAuditReader()
     {
-        return $this->get('simplethings_entityaudit.reader');
+        return $this->get('simplethings_entityaudit.manager')->createAuditReader();
     }
 
     /**
@@ -76,7 +77,7 @@ class AuditController extends Controller
     {
         $revision = $this->getAuditReader()->findRevision($rev);
         if (!$revision) {
-            throw $this->createNotFoundException(sprintf('Revision %i not found', $rev));
+            throw $this->createNotFoundException(sprintf('Revision %s not found', $rev));
         }
 
         $changedEntities = $this->getAuditReader()->findEntitiesChangedAtRevision($rev);
